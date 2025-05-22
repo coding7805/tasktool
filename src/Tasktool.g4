@@ -40,7 +40,7 @@ cmd_excsql
 batchId
     : POSITIVE_NUMBERS ;
 columnName
-    : ID ;
+    : ID;
 tableName
     : (ID DOT)? ID ;
 processId
@@ -56,7 +56,7 @@ split_batch_statement
     : '.SQL' BATCH RESET? (WITH RETRY errorlist? )? ('ID' | 'ID' '=')? batchId
       processId
       ON? tableName (EACH POSITIVE_NUMBERS)?
-      (BY columnName (GROUP BY groupByExpr )?)?
+      (BY columnName (',' columnName)? (GROUP BY groupByExpr )?)?
       ('HINT' hintStatement)?
       ('WHERE'  whereStatement)?
      ;
@@ -70,9 +70,9 @@ run_batch_statement
     ;
 cmd_try
     : '.TRY'
-           tryblock += block_batch*
+           tryblock += block_try*
       '.EXCEPTION'
-           exceptblock += block_batch*
+           exceptblock += block_try*
       '.END TRY'
     ;
 do_statement
@@ -100,7 +100,12 @@ for_if
       ('.ELSE' elseblock += block_for*)?
       '.END' 'IF'
     ;
-
+batch_if
+    : '.IF'  condition
+      '.THEN'  thenblock += block_batch*
+     ('.ELSE' elseblock += block_batch*)?
+     '.END' 'IF'
+    ;
 cmd_for
     : '.FOR'   ( ('DATA' 'IN' sqlStment)
                | ('SEQ'  ID 'FROM' number 'TO' number ('STEP' number)?)
@@ -131,12 +136,11 @@ block_base
     | cmd_os
     | cmd_print
     ;
- batch_if
-    : '.IF'  condition
-      '.THEN'  thenblock += block_batch*
-     ('.ELSE' elseblock += block_batch*)?
-     '.END' 'IF'
+ block_try
+    : block_batch
+    | split_batch_statement
     ;
+
  block_batch
      : cmd_logoff
      | get_statement
@@ -145,6 +149,7 @@ block_base
      | cmd_set
      | cmd_os
      | cmd_print
+     | cmd_exit
      ;
 condition
     : ERROR_CODE     op=('>'|'<'|'<>'|'!='|'>='|'<='|'=') number
