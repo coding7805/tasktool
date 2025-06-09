@@ -431,8 +431,10 @@ public class TaskMgr implements IForStatment {
         if(needSetJobId(exe, param)) return;
         String[] r = mappingFieldValue(cursor, info.batch.processId,exe.result);
         info.batch.processId = r[0];
-        r = mappingFieldValue(cursor, info.batch.where, exe.result);
-        info.batch.where = r[0];
+        if(info.batch.where != null) {
+            r = mappingFieldValue(cursor, info.batch.where, exe.result);
+            info.batch.where = r[0];
+        }
         Instant instant1 = Instant.now();
         exe.splitBatch(info.batch,param);
         Instant instant2 = Instant.now();

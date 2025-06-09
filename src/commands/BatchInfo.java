@@ -23,7 +23,7 @@ public class BatchInfo implements Cloneable {
 
     public String getBatchTaskSQL(SetInfo cfg) {
         return String.format("select task_id,start_key,end_key from %s where job_id = %d  and batch_id = %d and process_id = '%s'  "
-                + " and task_status in (0,1,2)"
+                + " and task_status in (0,1,2) order by rand() "
                 , cfg.batchTable, cfg.jobId, batchId, processId);
     }
 
@@ -177,7 +177,7 @@ public class BatchInfo implements Cloneable {
     }
 
     public String getFailedTransSQL(SetInfo param) {
-        return String.format("update  %s set task_status = 2, end_time = current_timestamp(), task_errcode = {except:code},task_errmessage = '{except:message}'  " +
+        return String.format("update  %s set task_status = 2, end_time = current_timestamp(), task_errcode = {except:code},task_errmessage = substr('{except:message}',1,512)  " +
                         "where task_id = {task_id} "
                 , param.batchTable);
     }
