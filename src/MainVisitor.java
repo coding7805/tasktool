@@ -19,11 +19,9 @@ public class MainVisitor extends TasktoolBaseVisitor<Object> {
        while(count > 0) {
            int n = i % hosts.length;
            if(hosts[n] < instances.instance(n).POSITIVE_NUMBERS().size()) {
-               String ip = "";
+               String ip = instances.instance(n).ip.getText();;
                if(instances.instance(n).STRING_LITERAL() != null) {
-                  ip = Utils.unQuotaString(instances.instance(n).ip.getText());
-               }else {
-                  ip = instances.instance(n).ip.getText();
+                  ip = Utils.unQuotaString(ip);
                }
                lst.add(ip + ":" + instances.instance(n).POSITIVE_NUMBERS(hosts[n]).getText());
                hosts[n] ++;
