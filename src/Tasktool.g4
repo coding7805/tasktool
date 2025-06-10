@@ -27,7 +27,8 @@ cmd_logon: '.LOGON' instances
              password
              ;
 instances: instance (',' instance)* ;
-instance:  ip=IP_ADDRESS ':' port=POSITIVE_NUMBERS('/' POSITIVE_NUMBERS)* ;
+instance:  (ip=IP_ADDRESS ':' port=POSITIVE_NUMBERS('/' POSITIVE_NUMBERS)* )
+         | (ip=STRING_LITERAL ':' port=POSITIVE_NUMBERS);
 user:      USER STRING_LITERAL;
 password:  PASSWORD STRING_LITERAL;
 
