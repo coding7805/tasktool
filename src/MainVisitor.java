@@ -126,6 +126,7 @@ public class MainVisitor extends TasktoolBaseVisitor<Object> {
         if(ctx.columnName() != null) batch.columnName = Utils.unQuotaString(ctx.columnName().getText()).trim();
         if(batch.columnName != null && batch.columnName.isEmpty()) batch.columnName = null;
         if(ctx.groupByExpr() != null) batch.groupBy = Utils.unQuotaString(ctx.groupByExpr().getText());
+        if(ctx.NOCROSS() != null) batch.noCross = true;
         if(ctx.whereStatement() != null) batch.where = Utils.unQuotaString(ctx.whereStatement().getText());
         if(ctx.hintStatement() != null) batch.hint = Utils.unQuotaString(ctx.hintStatement().getText());
         errlist = ctx.errorlist();

@@ -57,7 +57,7 @@ split_batch_statement
     : '.SQL' BATCH RESET? (WITH RETRY errorlist? )? ('ID' | 'ID' '=')? batchId
       processId
       ON? tableName (EACH POSITIVE_NUMBERS)?
-      (BY columnName (GROUP BY groupByExpr )?)?
+      (BY columnName (GROUP BY groupByExpr )? NOCROSS? )?
       ('HINT' hintStatement)?
       ('WHERE'  whereStatement)?
      ;
@@ -236,6 +236,7 @@ LIMIT:                    'LIMIT';
 LOG:                      'LOG';
 NOT:                      'NOT';
 POSITIVE_NUMBERS:         [1-9][0-9]*;
+NOCROSS:                  'NOCROSS';
 NUMBERS:                  '-'?[0-9]+;
 OFF:                      'OFF';
 ON:                       'ON';

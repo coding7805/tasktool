@@ -75,6 +75,7 @@ public class SqlExecutor {
             String cols = b.columnName == null ? defBatchCols[0] : b.columnName;
             if(cols.contains(",")) {
                 Utils.log(String.format("use (%s) >= ({start_key}) and (%s) <= ({end_key}) to qualify the data.",cols,cols));
+                Utils.log("or use {start_col1} {start_col2} {end_col1} {end_col2} to qualify the data.");
             }else{
                 Utils.log(String.format("use %s between {start_key} and {end_key} to qualify the data.",cols));
             }
@@ -96,8 +97,8 @@ public class SqlExecutor {
             } else {
                 if(stmt.execute(sql)) {
                     ResultSet rs = stmt.getResultSet();
-                    rs.last();
-                    int rows = rs.getRow();
+                    int rows = 0;
+                    while(rs.next()) rows++;
                     rs.close();
                     result.activityCount = rows;
                 } else {
