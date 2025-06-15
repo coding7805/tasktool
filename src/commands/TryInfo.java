@@ -6,6 +6,8 @@ import java.util.List;
 public class TryInfo extends BaseInfo implements Cloneable{
     public List<BaseInfo> tryBlocks;
     public List<BaseInfo> exceptBlocks;
+
+    public boolean internal_use_for_run_batch;
     public TryInfo() {
         tryBlocks = new ArrayList<>();
         exceptBlocks = new ArrayList<>();

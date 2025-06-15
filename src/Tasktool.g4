@@ -136,10 +136,12 @@ block_base
     | cmd_set
     | cmd_os
     | cmd_print
+    | cmd_try
     ;
  block_try
     : block_batch
     | split_batch_statement
+    | run_batch_statement
     ;
 
  block_batch
@@ -151,6 +153,7 @@ block_base
      | cmd_os
      | cmd_print
      | cmd_exit
+     | cmd_try
      ;
 condition
     : ERROR_CODE     op=('>'|'<'|'<>'|'!='|'>='|'<='|'=') number

@@ -14,19 +14,23 @@ public class Result implements Cloneable{
     public DataSet rows;
     public int sqlCode;
     public String sqlErrorMsg;
-    public int exceptionCode;   // only for try exception statement
-    public String exceptionMessage; // only for try exception statement
-    public void setException() {
-        exceptionCode = sqlCode;
-        exceptionMessage = sqlErrorMsg.replaceAll("'","''");
+    private int exceptCode; // only for try statement
+    private String exceptMsg; //only for try statement
+    public void setException(int code, String msg) {
+        exceptCode = code;
+        exceptMsg = msg;
     }
-    public void resetException() {
-        exceptionCode = 0;
-        exceptionMessage = "";
+    public boolean hasException() { return exceptCode != 0;}
+    public int getExceptCode() { return exceptCode; };
+    public String getExceptMsg() { return exceptMsg;}
+    public boolean hasError() {
+        return errorCode != 0;
     }
     public void setSqlErrorMsg(int code, String msg) {
         sqlCode = code;
         sqlErrorMsg = msg;
+        errorCode = code;
+        errorMessage = msg;
     }
     public void resetSqlError() {
         sqlCode = 0;
@@ -44,10 +48,10 @@ public class Result implements Cloneable{
             rows = new DataSet(set);
         }
     }
-    public boolean isNeedContinue() {
+    public boolean needContinue() {
         return needContinue;
     }
-    public boolean isNeedBreak() {
+    public boolean needBreak() {
         return needBreak;
     }
 
@@ -57,12 +61,17 @@ public class Result implements Cloneable{
     public void setBreak(boolean blBreak) {
         needBreak = blBreak;
     }
-    public void setValue(int code, long count, String msg,int errCount,boolean success, int osCode, ResultSet set, boolean blContinue,boolean blBreak) {
-        setValue(code,count,msg,errCount,success,osCode,set);
-        needContinue = blContinue;
-        needBreak = blBreak;
-    }
+
     public void reset() {
         setValue(0,0, "", 0,true,0,null);
+    }
+
+    @Override
+    public Result clone() {
+        try {
+            return (Result) super.clone();
+        } catch (CloneNotSupportedException e) {
+            throw new AssertionError();
+        }
     }
 }

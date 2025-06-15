@@ -10,6 +10,7 @@ public class BatchInfo implements Cloneable {
     public String tableName;
     public String columnName;
     public String groupBy;
+    public boolean noCross;
     public String hint = "";
     public String where;
     public String getCheckBatchSQL(SetInfo cfg){
@@ -22,7 +23,12 @@ public class BatchInfo implements Cloneable {
     }
 
     public String getBatchTaskSQL(SetInfo cfg) {
-        return String.format("select task_id,start_key,end_key from %s where job_id = %d  and batch_id = %d and process_id = '%s'  "
+        return String.format("select task_id,start_key,end_key, "
+                + " replace(regexp_replace(start_key,\"','.+\",''),\"('\",'') start_col1,"
+                + " replace(regexp_replace(start_key,\".+','\",''),\"')\",'') start_col2,"
+                + " replace(regexp_replace(end_key,\"','.+\",''),\"('\",'') end_col1,"
+                + " replace(regexp_replace(end_key,\".+','\",''),\"')\",'') end_col2"
+                + " from %s where job_id = %d  and batch_id = %d and process_id = '%s'  "
                 + " and task_status in (0,1,2) order by rand() "
                 , cfg.batchTable, cfg.jobId, batchId, processId);
     }
@@ -53,6 +59,11 @@ public class BatchInfo implements Cloneable {
                 "  and lower(a.table_name) = '%s' " +
                 " order by b.SEQ_IN_INDEX  limit 2 ) t",dbname, tbname);
     }
+
+    /**
+     * if configured groupBy ,the column in groupBy must exists in columnName, otherwise
+     * the split result would be wrong. e.g ( by customer_no group by txn_dt, substr(customer_no,1,4) )
+     */
     public String getSplitBatchSQL(SetInfo cfg, String[] defCols) {
         if(batchRows == 0) batchRows = DEFAULT_BATCH_ROWS;
         //agg_rows used only for default split
@@ -69,13 +80,13 @@ public class BatchInfo implements Cloneable {
                 if(colType[0].trim().equals("1")) {
                     sb.append(" sum(cnt) as batchSize, min(minKey) as startKey, max(maxKey) as endKey ")
                     .append(" from ( ")
-                    .append("   select minKey, maxKey, cnt, floor((sum(cnt) over(order by minKey) -1 ) / ").append(batchRows).append(") page ")
+                    .append("   select minKey, maxKey, cnt, floor((sum(cnt) over(order by minKey) ) / ").append(batchRows).append(") page ")
                     .append("   from ( ")
                     .append("      select /*+ agg_to_cop()  ").append(hint == null ? "" : hint).append(" */ ")
                     .append("         min(").append(colName[0]).append(") minKey, max(").append(colName[0]).append(") maxKey, count(*) cnt ")
                     .append("      from ").append(tableName)
                     .append(       where == null ? "" : " where (" + where + ")")
-                    .append("      group by floor((").append(colName[0]).append(" - 1) / ").append(agg_rows).append(" )")
+                    .append("      group by floor((").append(colName[0]).append(") / ").append(agg_rows).append(" )")
                     .append("    ) t1 ")
                     .append(" ) t2 ")
                     .append("group by page");
@@ -84,7 +95,7 @@ public class BatchInfo implements Cloneable {
                     sb.append(" count(*) as batchSize, min(minKey) as startKey, max(minKey) as endKey ")
                             .append(" from (")
                             .append("   select ").append(hint == null ? "" : " /*+ " + hint + " */ ")
-                            .append("   floor((rank() over(order by ").append(colName[0]).append(") - 1) / ").append(batchRows).append(") page " )
+                            .append("   floor((rank() over(order by ").append(colName[0]).append(")) / ").append(batchRows).append(") page " )
                     .append("  ,").append(colName[0]).append("  minKey ")
                     .append("  from ").append(tableName)
                     .append(where == null ? "" : " where (" + where + ")")
@@ -97,18 +108,18 @@ public class BatchInfo implements Cloneable {
                     .append(" concat('(''',LAST_VALUE(").append(colName[0]).append(") over w,''',''',LAST_VALUE(maxKey) over w,''')') as endKey ")
                     .append(" from ( ")
                     .append(" select ").append(colName[0]).append(",minKey, maxKey, cnt, ")
-                    .append(" floor((sum(cnt) over(order by ").append(colName[0]).append(", minKey) - 1) / ").append(batchRows).append(") page")
+                    .append(" floor((sum(cnt) over(order by ").append(colName[0]).append(", minKey)) / ").append(batchRows).append(") page")
                     .append(" from ( ")
                     .append("      select /*+ agg_to_cop()  ").append(hint == null ? "" : hint).append(" */ ");
                     if(colType[1].trim().equals("1")) {
-                        sb.append(       colName[0]).append(", min(").append(colName[1]).append(") minKey, max(").append(colName[1]).append(") maxKey,count(*) cnt ");
+                        sb.append(colName[0]).append(", min(").append(colName[1]).append(") minKey, max(").append(colName[1]).append(") maxKey,count(*) cnt ");
                     } else {
                         sb.append(colName[0]).append(", ").append(colName[1]).append(" minKey, ").append(colName[1]).append(" maxKey, 1 cnt ");
                     }
                     sb.append(" from ").append(tableName)
                     .append( where == null ? "" : " where (" + where + ")");
                     if(colType[1].trim().equals("1")) {
-                        sb.append(" group by ").append(colName[0]).append(", floor((").append(colName[1]).append(" - 1) / ").append(agg_rows).append(" )");
+                        sb.append(" group by ").append(colName[0]).append(", floor((").append(colName[1]).append(") / ").append(agg_rows).append(" )");
                     }
                     sb.append(") t1 ")
                     .append(") t2 window w as (partition by page order by ").append(colName[0]).append(",minKey rows between UNBOUNDED PRECEDING and UNBOUNDED FOLLOWING)")
@@ -121,7 +132,7 @@ public class BatchInfo implements Cloneable {
             if(colName.length == 1) {
                 sb.append(" sum(cnt) as batchSize, min(minKey) as startKey, max(maxKey) as endKey ")
                 .append(" from ( ")
-                .append("   select minKey, maxKey, cnt, floor((sum(cnt) over(order by minKey) -1 ) / ").append(batchRows).append(") page ")
+                .append("   select minKey, maxKey, cnt, floor((sum(cnt) over(order by minKey) ) / ").append(batchRows).append(") page ")
                 .append("   from ( ")
                 .append("      select /*+ agg_to_cop()  ").append(hint == null ? "" : hint).append(" */ ")
                 .append("         min(").append(colName[0]).append(") minKey, max(").append(colName[0]).append(") maxKey, count(*) cnt ")
@@ -138,16 +149,20 @@ public class BatchInfo implements Cloneable {
                 .append(" concat('(''',FIRST_VALUE(minKey1) over w,''',''',FIRST_VALUE(minKey2) over w,''')') as startKey, ")
                 .append(" concat('(''',LAST_VALUE(maxKey1)  over w,''',''',LAST_VALUE(maxKey2) over w,''')') as endKey ")
                 .append(" from ( ")
-                .append(" select minKey1,maxKey1,minKey2, maxKey2, cnt, ")
-                .append(" floor((sum(cnt) over(order by minKey1, minKey2) - 1) / ").append(batchRows).append(") page")
+                .append(" select ")
+                .append(  noCross ? colName[0] + "," : "")
+                .append(" minKey1,maxKey1,minKey2, maxKey2, cnt, ")
+                .append(" floor((sum(cnt) over(order by minKey1, minKey2) ) / ").append(batchRows).append(") page")
                 .append(" from ( ")
                 .append("      select /*+ agg_to_cop()  ").append(hint == null ? "" : hint).append(" */ ")
+                .append(         noCross ? colName[0] + "," : "")
                 .append("        min(").append(colName[0]).append(") minKey1, max(").append(colName[0]).append(") maxKey1, min(").append(colName[1]).append(") minKey2, max(").append(colName[1]).append(") maxKey2,count(*) cnt ")
                 .append("      from ").append(tableName)
                 .append(       where == null ? "" : " where (" + where + ")")
                 .append("      group by ").append(groupBy != null ? groupBy : columnName)
                 .append("     ) t1 ")
-                .append("   ) t2 window w as (partition by page order by minKey1, minKey2 rows between UNBOUNDED PRECEDING and UNBOUNDED FOLLOWING)")
+                .append("   ) t2 window w as (partition by ").append(noCross ? colName[0] + "," : "")
+                .append(" page order by minKey1, minKey2 rows between UNBOUNDED PRECEDING and UNBOUNDED FOLLOWING)")
                 .append(") t3");
                 //System.out.println("[\n" + sb.toString() + "\n]");
             }
@@ -165,19 +180,19 @@ public class BatchInfo implements Cloneable {
     }
 
     public String getStartTransSQL(SetInfo param) {
-        return String.format("update  %s set task_status = 1, start_time = current_timestamp(), end_time = null, task_errcode = null,task_errmessage = null  " +
+        return String.format("update  %s set task_status = 1, start_time = current_timestamp(3), end_time = null, task_errcode = null,task_errmessage = null  " +
                         "where task_id = {task_id} "
                 , param.batchTable);
     }
 
     public String getSuccessTransSQL(SetInfo param) {
-        return String.format("update  %s set task_status = 3, end_time = current_timestamp(), task_errcode = 0,task_errmessage = 'success'  " +
+        return String.format("update  %s set task_status = 3, end_time = current_timestamp(3), task_errcode = 0,task_errmessage = 'success'  " +
                         "where task_id = {task_id} "
                 , param.batchTable);
     }
 
     public String getFailedTransSQL(SetInfo param) {
-        return String.format("update  %s set task_status = 2, end_time = current_timestamp(), task_errcode = {except:code},task_errmessage = substr('{except:message}',1,512)  " +
+        return String.format("update  %s set task_status = 2, end_time = current_timestamp(3), task_errcode = {except:code},task_errmessage = substr('{except:message}',1,512)  " +
                         "where task_id = {task_id} "
                 , param.batchTable);
     }

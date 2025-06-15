@@ -265,6 +265,8 @@ public class MainVisitor extends TasktoolBaseVisitor<Object> {
                     visitBlockBatch(t.tryBlocks, x.block_batch());
                 }else if(x.split_batch_statement() != null) {
                     t.tryBlocks.add(visitSplit_batch_statement(x.split_batch_statement()));
+                }else if(x.run_batch_statement() != null){
+                    t.tryBlocks.add(visitRun_batch_statement(x.run_batch_statement()));
                 }
             });
         }
@@ -274,6 +276,8 @@ public class MainVisitor extends TasktoolBaseVisitor<Object> {
                     visitBlockBatch(t.exceptBlocks, x.block_batch());
                 }else if(x.split_batch_statement() != null) {
                     t.exceptBlocks.add(visitSplit_batch_statement(x.split_batch_statement()));
+                }else if(x.run_batch_statement() != null){
+                    t.exceptBlocks.add(visitRun_batch_statement(x.run_batch_statement()));
                 }
             });
         }
@@ -335,6 +339,8 @@ public class MainVisitor extends TasktoolBaseVisitor<Object> {
             blocks.add(visitCmdOs(blk.cmd_os()));
         } else if(blk.cmd_print() != null) {
             blocks.add(visitCmdPrint(blk.cmd_print()));
+        } else if(blk.cmd_try() != null){
+            blocks.add(visitCmd_try(blk.cmd_try()));
         }
     }
     private void visitBlockBatch(List<BaseInfo> blocks, TasktoolParser.Block_batchContext blk) {
@@ -354,6 +360,8 @@ public class MainVisitor extends TasktoolBaseVisitor<Object> {
             blocks.add(visitCmd_exit(blk.cmd_exit()));
         } else if(blk.batch_if() != null) {
             blocks.add(visitBatch_if(blk.batch_if()));
+        } else if(blk.cmd_try() != null) {
+            blocks.add(visitCmd_try(blk.cmd_try()));
         }
     }
     public ForStatementInfo visitCmdFor(TasktoolParser.CmdForContext ctx) {

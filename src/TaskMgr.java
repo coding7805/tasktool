@@ -25,6 +25,7 @@ public class TaskMgr implements IForStatment {
     private final SqlExecutor session;
     private final SetInfo params;
     private final Map<String, String> env;
+    private final Context ctx;
     private static final Pattern pattern = Pattern.compile("\\{([^}]+)\\}");
     private String[] commandArgs;
     public TaskMgr() {
@@ -34,6 +35,7 @@ public class TaskMgr implements IForStatment {
         session = new SqlExecutor(cfg,new Result());
         params = new SetInfo();
         env = System.getenv();
+        ctx = new Context();
     }
     public boolean compileFile(String filename) {
         File f = new File(filename);
@@ -73,7 +75,7 @@ public class TaskMgr implements IForStatment {
         }
         return validCheckAllStatement();
     }
-    private Result runOneCommand(BaseInfo cmd, SetInfo setCfg, SqlExecutor sess, HashMap<String,String> cursor) {
+    private Result runOneCommand(BaseInfo cmd, SetInfo setCfg, SqlExecutor sess, HashMap<String,String> cursor,Context context) {
         Result ret = null;
         int cmdType = cmd.getType();
         if(cmdType == BaseInfo.EXC_SQL) {
@@ -82,7 +84,7 @@ public class TaskMgr implements IForStatment {
                 doBatch(sql, sess, cursor, setCfg);
                 ret = sess.result;
             } else if(sql.type == SqlInfo.RunBatch) {
-                ret = doRunBatch(sql, sess, cursor, setCfg);
+                ret = doRunBatch(sql, sess, cursor, setCfg,context);
             } else {
                 doSql(sql, sess, cursor, setCfg);
                 if (sess.result.rows != null) sess.result.rows.displayDataSet();
@@ -120,7 +122,10 @@ public class TaskMgr implements IForStatment {
                     ret.setBreak(true);
                     break;
                 } else {
-                    ret = runOneCommand(s, setCfg, sess, cursor);
+                    ret = runOneCommand(s, setCfg, sess, cursor,context);
+                    if(ret.hasError() && context.isTryContext()) {
+                        break;
+                    }
                 }
             }
 
@@ -129,8 +134,8 @@ public class TaskMgr implements IForStatment {
             ForStatementInfo forStmt = (ForStatementInfo) cmd;
             if(forStmt.forKind == ForStatementInfo.FOR_DATA) {
                 doSql(new SqlInfo(SqlInfo.SELECT, forStmt.dataSql), sess, cursor, setCfg);
-                if (sess.result.errorCode != 0 || sess.result.rows == null || sess.result.rows.isEmpty()) {
-                    sess.result.allSuccess = (sess.result.errorCode == 0) && (sess.result.rows != null);
+                if (sess.result.hasError() || sess.result.rows == null || sess.result.rows.isEmpty()) {
+                    sess.result.allSuccess = (!sess.result.hasError()) && (sess.result.rows != null);
                     return sess.result;
                 }
                 ds = sess.result.rows;
@@ -141,7 +146,7 @@ public class TaskMgr implements IForStatment {
             }
             SetInfo par = (SetInfo)setCfg.clone();
             forStmt.withBlocks.stream().filter(s->s.operator != SetInfo.SET_DATABASE).forEach(x->doSet(x,par,null, cursor));
-            TaskThreads task = new TaskThreads(ds,par,forStmt.withBlocks,forStmt.doBlocks,this,cursor);
+            TaskThreads task = new TaskThreads(ds,par,forStmt.withBlocks,forStmt.doBlocks,this,cursor,context);
             ret = task.run();
         } else if(cmdType == BaseInfo.OS_CMD) {
             doOsCmd((OsCmdInfo) cmd, cursor, sess.result, setCfg);
@@ -154,25 +159,44 @@ public class TaskMgr implements IForStatment {
             Help.printHelp();
             ret = sess.result;
         } else if(cmdType == BaseInfo.TRY_STATMENT) {
-            doTryStatment((TryInfo) cmd, cursor, sess, setCfg);
-            ret = sess.result;
+            ret = doTryStatment((TryInfo) cmd, cursor, sess, setCfg,context);
         }
         return ret;
     }
 
-    private void doTryStatment(TryInfo cmd, HashMap<String, String> cursor, SqlExecutor exe, SetInfo setCfg) {
+    private Result doTryStatment(TryInfo cmd, HashMap<String, String> cursor, SqlExecutor exe, SetInfo setCfg, Context ctx) {
         Result ret = null;
-        exe.result.resetException();
+        int exceptCode = 0;
+        String exceptMsg = "";
+        Context context = new Context();
+        context.setTryContext(true);
         for(BaseInfo base: cmd.tryBlocks) {
-            ret = runOneCommand(base, setCfg, exe, cursor);
-            if(base.getType() == BaseInfo.EXC_SQL &&  ret.errorCode != 0) break;
+            ret = runOneCommand(base, setCfg, exe, cursor,context);
+            if(ret.hasError()) break;
         }
-        if(ret != null && ret.errorCode != 0) {
-            exe.result.setException();
+        if(ret != null && ret.hasError()) {
+            if(cmd.internal_use_for_run_batch) {
+                exceptCode = ret.errorCode;
+                exceptMsg = ret.errorMessage;
+                exe.result.setException(exceptCode, exceptMsg);
+            }
+
+            if(cmd.exceptBlocks.isEmpty()) return new Result(); //eat the exception
+
             for(BaseInfo base: cmd.exceptBlocks) {
-                ret = runOneCommand(base, setCfg, exe, cursor);
+                ret = runOneCommand(base, setCfg, exe, cursor,ctx);
+                if(ret.hasError() && ctx.isTryContext()) break;
             }
         }
+        if(cmd.internal_use_for_run_batch){
+            if(ret.hasError()) return ret;
+            if(exceptCode != 0) {
+                ret.errorCode = exceptCode;
+                ret.errorMessage = exceptMsg;
+                return ret;
+            }
+        }
+        return ret == null ? new Result() : ret;
     }
 
     private void doPrint(PrintInfo cmd, HashMap<String, String> cursor, Result result, SetInfo setCfg) {
@@ -207,7 +231,8 @@ public class TaskMgr implements IForStatment {
             result.osExitCode = process.waitFor();
             outputThread.join(); // Wait for the output thread to finish
             process.destroy();
-        } catch (Exception e) {
+            result.errorCode = result.osExitCode; //if exitcode != 0 ,means error happened
+        }catch(Exception e) {
             result.errorCode = -1;
             result.errorMessage = e.getMessage();
             Utils.log(e.getMessage());
@@ -235,11 +260,11 @@ public class TaskMgr implements IForStatment {
             } else {
                 sb.append(Utils.getElapsedTime(instant1, instant2));
             }
-            if (result.errorCode != 0) {
+            if (result.hasError()) {
                 sb.append(", error code: ").append(result.errorCode)
                   .append(" error message: ").append(result.errorMessage);
             }
-            if((result.errorCode != 0 && info.retry) && (info.errorList == null
+            if((result.hasError() && info.retry) && (info.errorList == null
                     || info.errorList.isEmpty() || info.errorList.containsKey(result.errorCode))) {
                 long sleepTime = param.retryInterval <= 0 ? SetInfo.DEFAULT_RETRY_INTERVAL_SECS : param.retryInterval;
                 if (param.retryIntervalRandom > 0) {
@@ -298,7 +323,7 @@ public class TaskMgr implements IForStatment {
                     try {
                         if (compile(sb.toString())) {
                             commands = generateCommands();
-                            commands.forEach(cmd -> session.result = runOneCommand(cmd, params, session, new HashMap<>()));
+                            commands.forEach(cmd -> session.result = runOneCommand(cmd, params, session, new HashMap<>(),ctx));
                         }
                     }finally {
                         sb.setLength(0);
@@ -343,10 +368,11 @@ public class TaskMgr implements IForStatment {
                 || forstmt.forKind == ForStatementInfo.FOR_LIST)
                 || (forstmt.step != 0);
     }
+
     public void run(String[] args) {
         commandArgs = args;
         List<BaseInfo> commands = generateCommands();
-        commands.forEach(cmd -> session.result = runOneCommand(cmd, params, session, new HashMap<>()));
+        commands.forEach(cmd -> session.result = runOneCommand(cmd, params, session, new HashMap<>(),ctx));
     }
     private void doSet(SetInfo info, SetInfo tgt, SqlExecutor exe, HashMap<String,String> cursor) {
         switch (info.operator) {
@@ -403,7 +429,7 @@ public class TaskMgr implements IForStatment {
         }
         return false;
     }
-    private Result doRunBatch(SqlInfo info, SqlExecutor exe, HashMap<String,String> cursor, SetInfo param) {
+    private Result doRunBatch(SqlInfo info, SqlExecutor exe, HashMap<String,String> cursor, SetInfo param,Context ctx) {
        if(needSetJobId(exe, param)) {
            Result ret = new Result();
            ret.errorCode = -1;
@@ -415,6 +441,7 @@ public class TaskMgr implements IForStatment {
        info.batch.processId = r[0];
        info.forStmt.dataSql = info.batch.getBatchTaskSQL(param);
        TryInfo tryinfo = new TryInfo();
+       tryinfo.internal_use_for_run_batch = true;
        tryinfo.tryBlocks.add(new SqlInfo(SqlInfo.NonSELECT,info.batch.getStartTransSQL(param)));
        tryinfo.tryBlocks.add(new SqlInfo(SqlInfo.NonSELECT,"begin;"));
        tryinfo.tryBlocks.addAll(info.forStmt.doBlocks);
@@ -425,7 +452,7 @@ public class TaskMgr implements IForStatment {
        tryinfo.exceptBlocks.add(new SqlInfo(SqlInfo.NonSELECT,info.batch.getFailedTransSQL(param)));
        info.forStmt.doBlocks.clear();
        info.forStmt.doBlocks.add(tryinfo);
-       return runOneCommand(info.forStmt,param,exe,cursor);
+       return runOneCommand(info.forStmt,param,exe,cursor,ctx);
     }
     private void doBatch(SqlInfo info, SqlExecutor exe, HashMap<String,String> cursor, SetInfo param) {
         if(needSetJobId(exe, param)) return;
@@ -440,7 +467,7 @@ public class TaskMgr implements IForStatment {
         Instant instant2 = Instant.now();
         StringBuilder sb = new StringBuilder();
         sb.append(Utils.getElapsedTime(instant1, instant2));
-        if (exe.result.errorCode != 0) {
+        if (exe.result.hasError()) {
             sb.append(", error code: ").append(exe.result.errorCode)
                     .append(" error message: ").append(exe.result.errorMessage);
         } else {
@@ -466,14 +493,14 @@ public class TaskMgr implements IForStatment {
                 Utils.log(Utils.formatSQL(r[0]));
                 sb.append(Utils.getElapsedTime(instant1, instant2));
             }
-            if (exe.result.errorCode != 0) {
+            if (exe.result.hasError()) {
                 sb.append(", error code: ").append(exe.result.errorCode)
                         .append(" error message: ").append(exe.result.errorMessage);
             } else {
                 sb.append(", affected rows: ").append(exe.result.activityCount);
             }
 
-            if((exe.result.errorCode != 0 && info.retry) && (info.errorList == null
+            if((exe.result.hasError() && info.retry) && (info.errorList == null
                     || info.errorList.isEmpty() || info.errorList.containsKey(exe.result.errorCode))) {
                     long sleepTime = param.retryInterval <= 0 ? SetInfo.DEFAULT_RETRY_INTERVAL_SECS : param.retryInterval;
                     if (param.retryIntervalRandom > 0) {
@@ -517,12 +544,24 @@ public class TaskMgr implements IForStatment {
                 } else if(matcher.group(1).equalsIgnoreCase("sqlerr:message")) {
                     colName =  "\\{" + matcher.group(1) + "\\}";
                     colValue = lastError.sqlErrorMsg;
+                }else if(matcher.group(1).equalsIgnoreCase("sqlerr:message_sq")) {
+                    colName =  "\\{" + matcher.group(1) + "\\}";
+                    colValue = lastError.sqlErrorMsg.replaceAll("'","''");
+                } else if(matcher.group(1).equalsIgnoreCase("error:code")) {
+                    colName =  "\\{" + matcher.group(1) + "\\}";
+                    colValue = lastError.errorCode + "";
+                } else if(matcher.group(1).equalsIgnoreCase("error:message")) {
+                    colName =  "\\{" + matcher.group(1) + "\\}";
+                    colValue = lastError.errorMessage;
+                }else if(matcher.group(1).equalsIgnoreCase("error:message_sq")) {
+                    colName =  "\\{" + matcher.group(1) + "\\}";
+                    colValue = lastError.errorMessage.replaceAll("'","''");
                 } else if(matcher.group(1).equalsIgnoreCase("except:code")) {
                     colName =  "\\{" + matcher.group(1) + "\\}";
-                    colValue = lastError.exceptionCode + "";
+                    colValue = lastError.getExceptCode() + "";
                 } else if(matcher.group(1).equalsIgnoreCase("except:message")) {
                     colName =  "\\{" + matcher.group(1) + "\\}";
-                    colValue = lastError.exceptionMessage;
+                    colValue = lastError.getExceptMsg().replaceAll("'","''");;
                 }else if(matcher.group(1).toLowerCase().startsWith("args:")) {
                     String args = matcher.group(1).substring(5).trim();
                     colName  = "\\{" + matcher.group(1) + "\\}";
@@ -554,7 +593,7 @@ public class TaskMgr implements IForStatment {
         return r;
     }
     @Override
-    public Result doForStatment(DataSet data, SetInfo par, List<SetInfo> initBlocks, List<BaseInfo> doBlocks, TaskLocks locks, HashMap<String,String> cursorCtx) {
+    public Result doForStatment(DataSet data, SetInfo par, List<SetInfo> initBlocks, List<BaseInfo> doBlocks, TaskLocks locks, HashMap<String,String> cursorCtx, Context ctx) {
         Result result = new Result();
         SqlExecutor exe = new SqlExecutor(cfg, result);
         exe.logon();
@@ -581,13 +620,13 @@ public class TaskMgr implements IForStatment {
             for (BaseInfo c : doBlocks) {
                 Result ret = null;
                 if(c.getType() != BaseInfo.FOR_BREAK && c.getType() != BaseInfo.FOR_CONTINUE) {
-                    ret = this.runOneCommand(c, par, exe, mergeCursor);
-                    if(ret.errorCode != 0 || ret.exceptionCode != 0) locks.incErrors();
+                    ret = this.runOneCommand(c, par, exe, mergeCursor,ctx);
+                    if(ret.hasError()) locks.incErrors();
                 }
-                if((ret != null && ret.isNeedContinue()) || c.getType() == BaseInfo.FOR_CONTINUE) {
+                if((ret != null && ret.needContinue()) || c.getType() == BaseInfo.FOR_CONTINUE) {
                     break;
                 }
-                if((ret != null && ret.isNeedBreak()) || c.getType() == BaseInfo.FOR_BREAK) {
+                if((ret != null && ret.needBreak()) || c.getType() == BaseInfo.FOR_BREAK) {
                     locks.setBreak();
                     return result;
                 }
