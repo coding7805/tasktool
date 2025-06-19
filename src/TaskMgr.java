@@ -597,6 +597,7 @@ public class TaskMgr implements IForStatment {
         Result result = new Result();
         SqlExecutor exe = new SqlExecutor(cfg, result);
         exe.logon();
+
         initBlocks.stream().filter(s -> s.operator == SetInfo.SET_DATABASE).forEach(x -> doSet(x, par, exe, cursorCtx));
         int row;
         while(true) {
@@ -611,13 +612,15 @@ public class TaskMgr implements IForStatment {
                 exe.logoff();
                 return result;
             }
-
+            List<BaseInfo> blks = new ArrayList<>();
+            doBlocks.forEach(x -> blks.add(x.clone()));
             Map<String, String> cursor = data.mapCursorValue(row);
             HashMap<String, String> mergeCursor = new HashMap<>();
             mergeCursor.putAll(cursorCtx);
             mergeCursor.putAll(cursor);
             locks.incExecuted();
-            for (BaseInfo c : doBlocks) {
+
+            for (BaseInfo c : blks) {
                 Result ret = null;
                 if(c.getType() != BaseInfo.FOR_BREAK && c.getType() != BaseInfo.FOR_CONTINUE) {
                     ret = this.runOneCommand(c, par, exe, mergeCursor,ctx);

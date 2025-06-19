@@ -31,6 +31,9 @@ public class SqlInfo extends BaseInfo implements Cloneable{
         if(batch != null) {
             c.batch = batch.clone();
         }
+        if(errorList != null) {
+            c.errorList = new HashMap<>(errorList);
+        }
         if(forStmt != null) {
             c.forStmt = forStmt.clone();
         }
