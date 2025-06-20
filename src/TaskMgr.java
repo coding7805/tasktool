@@ -429,7 +429,7 @@ public class TaskMgr implements IForStatment {
         }
         return false;
     }
-    private Result doRunBatch(SqlInfo info, SqlExecutor exe, HashMap<String,String> cursor, SetInfo param,Context ctx) {
+    private Result doRunBatch(SqlInfo sqlinfo, SqlExecutor exe, HashMap<String,String> cursor, SetInfo param,Context ctx) {
        if(needSetJobId(exe, param)) {
            Result ret = new Result();
            ret.errorCode = -1;
@@ -437,6 +437,7 @@ public class TaskMgr implements IForStatment {
            ret.allSuccess = false;
            return ret;
        }
+       SqlInfo info = sqlinfo.clone();
        String[] r = mappingFieldValue(cursor, info.batch.processId,exe.result);
        info.batch.processId = r[0];
        info.forStmt.dataSql = info.batch.getBatchTaskSQL(param);
@@ -454,8 +455,9 @@ public class TaskMgr implements IForStatment {
        info.forStmt.doBlocks.add(tryinfo);
        return runOneCommand(info.forStmt,param,exe,cursor,ctx);
     }
-    private void doBatch(SqlInfo info, SqlExecutor exe, HashMap<String,String> cursor, SetInfo param) {
+    private void doBatch(SqlInfo sqlinfo, SqlExecutor exe, HashMap<String,String> cursor, SetInfo param) {
         if(needSetJobId(exe, param)) return;
+        SqlInfo info = sqlinfo.clone();
         String[] r = mappingFieldValue(cursor, info.batch.processId,exe.result);
         info.batch.processId = r[0];
         if(info.batch.where != null) {
@@ -600,6 +602,7 @@ public class TaskMgr implements IForStatment {
 
         initBlocks.stream().filter(s -> s.operator == SetInfo.SET_DATABASE).forEach(x -> doSet(x, par, exe, cursorCtx));
         int row;
+        HashMap<String, String> mergeCursor = new HashMap<>(cursorCtx);
         while(true) {
             if (locks.needDecreaseThread(true)) {
                 exe.logoff();
@@ -612,15 +615,11 @@ public class TaskMgr implements IForStatment {
                 exe.logoff();
                 return result;
             }
-            List<BaseInfo> blks = new ArrayList<>();
-            doBlocks.forEach(x -> blks.add(x.clone()));
-            Map<String, String> cursor = data.mapCursorValue(row);
-            HashMap<String, String> mergeCursor = new HashMap<>();
-            mergeCursor.putAll(cursorCtx);
-            mergeCursor.putAll(cursor);
+
+            mergeCursor.putAll(data.mapCursorValue(row));
             locks.incExecuted();
 
-            for (BaseInfo c : blks) {
+            for (BaseInfo c : doBlocks) {
                 Result ret = null;
                 if(c.getType() != BaseInfo.FOR_BREAK && c.getType() != BaseInfo.FOR_CONTINUE) {
                     ret = this.runOneCommand(c, par, exe, mergeCursor,ctx);

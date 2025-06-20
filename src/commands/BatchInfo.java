@@ -12,6 +12,7 @@ public class BatchInfo implements Cloneable {
     public String groupBy;
     public boolean noCross;
     public String hint = "";
+
     public String where;
     public String getCheckBatchSQL(SetInfo cfg){
         return String.format("select 'batched' from %s where job_id = %d  and batch_id = %d and process_id = '%s' limit 1"
